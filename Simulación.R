@@ -1,3 +1,254 @@
+##################
+# FUNCIONES
+##################
+
+get_counts <- function(tab, correction = NULL) {
+  
+  TP <- tab[1,1]
+  FN <- tab[1,2]
+  FP <- tab[2,1]
+  TN <- tab[2,2]
+  
+  if(!is.null(correction)) {
+    if(correction == "haldane") {
+      TP <- TP + 0.5
+      FN <- FN + 0.5
+      FP <- FP + 0.5
+      TN <- TN + 0.5
+    }
+  }
+  
+  c(TP = TP, FN = FN, FP = FP, TN = TN)
+}
+
+
+metric_value <- function(tab, metric, correction = NULL) {
+  
+  x <- get_counts(tab, correction = correction)
+  
+  TP <- x["TP"]
+  FN <- x["FN"]
+  FP <- x["FP"]
+  TN <- x["TN"]
+  
+  N <- TP + FN + FP + TN
+  
+  sens <- TP / (TP + FN)
+  spec <- TN / (TN + FP)
+  ppv  <- TP / (TP + FP)
+  npv  <- TN / (TN + FN)
+  fpr  <- FP / (FP + TN)
+  fnr  <- FN / (FN + TP)
+  acc  <- (TP + TN) / N
+  
+  f1 <- 2 * TP / (2 * TP + FP + FN)
+  
+  bal_acc <- (sens + spec) / 2
+  youden <- sens + spec - 1
+  markedness <- ppv + npv - 1
+  
+  phi <- ((TP * TN) - (FP * FN)) /
+    sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
+  
+  mcc <- phi
+  
+  dor <- (TP * TN) / (FP * FN)
+  
+  yule_q <- (dor - 1) / (dor + 1)
+  yule_y <- (sqrt(dor) - 1) / (sqrt(dor) + 1)
+  
+  po <- acc
+  pe <- ((TP + FN) * (TP + FP) + (FP + TN) * (FN + TN)) / N^2
+  kappa <- (po - pe) / (1 - pe)
+  
+  p_pos <- ((TP + FN) / N + (TP + FP) / N) / 2
+  p_neg <- ((FP + TN) / N + (FN + TN) / N) / 2
+  pe_gwet <- p_pos * (1 - p_pos) + p_neg * (1 - p_neg)
+  gwet_ac1 <- (po - pe_gwet) / (1 - pe_gwet)
+  
+  if(metric == "sens") return(sens)
+  if(metric == "spec") return(spec)
+  if(metric == "ppv") return(ppv)
+  if(metric == "npv") return(npv)
+  if(metric == "fpr") return(fpr)
+  if(metric == "fnr") return(fnr)
+  if(metric == "acc") return(acc)
+  if(metric == "f1") return(f1)
+  if(metric == "balanced_accuracy") return(bal_acc)
+  if(metric == "youden") return(youden)
+  if(metric == "markedness") return(markedness)
+  if(metric == "phi") return(phi)
+  if(metric == "mcc") return(mcc)
+  if(metric == "yule_q") return(yule_q)
+  if(metric == "yule_y") return(yule_y)
+  if(metric == "dor") return(dor)
+  if(metric == "kappa") return(kappa)
+  if(metric == "gwet") return(gwet_ac1)
+}
+
+
+bootstrap_se <- function(tab, metric, B = 2000, correction = NULL) {
+  
+  x <- as.vector(tab)
+  N <- sum(x)
+  prob <- x / N
+  
+  values <- replicate(B, {
+    
+    sampled <- as.vector(rmultinom(1, size = N, prob = prob))
+    tab_b <- matrix(sampled, nrow = 2, byrow = FALSE)
+    
+    metric_value(tab_b, metric, correction = correction)
+  })
+  
+  values[!is.finite(values)] <- NA
+  
+  sd(values, na.rm = TRUE)
+}
+
+
+make_result <- function(tab, metric, SE = FALSE, method = "analytic",
+                        correction = NULL, B = 2000) {
+  
+  stat <- metric_value(tab, metric, correction = correction)
+  
+  if(SE == FALSE) {
+    return(list(statistic = stat))
+  }
+  
+  x <- get_counts(tab, correction = correction)
+  
+  TP <- x["TP"]
+  FN <- x["FN"]
+  FP <- x["FP"]
+  TN <- x["TN"]
+  
+  N <- TP + FN + FP + TN
+  
+  if(method == "analytic") {
+    
+    se <- switch(metric,
+                 sens = sqrt(stat * (1 - stat) / (TP + FN)),
+                 spec = sqrt(stat * (1 - stat) / (TN + FP)),
+                 ppv  = sqrt(stat * (1 - stat) / (TP + FP)),
+                 npv  = sqrt(stat * (1 - stat) / (TN + FN)),
+                 fpr  = sqrt(stat * (1 - stat) / (FP + TN)),
+                 fnr  = sqrt(stat * (1 - stat) / (FN + TP)),
+                 acc  = sqrt(stat * (1 - stat) / N),
+                 NA)
+    
+  } else if(method == "bootstrap") {
+    
+    se <- bootstrap_se(tab, metric, B = B, correction = correction)
+  }
+  
+  return(list(statistic = stat, se = se))
+}
+
+
+ind_sens <- function(tab, SE = FALSE, method = "analytic", correction = NULL) {
+  make_result(tab, "sens", SE, method, correction)
+}
+
+ind_spec <- function(tab, SE = FALSE, method = "analytic", correction = NULL) {
+  make_result(tab, "spec", SE, method, correction)
+}
+
+ind_ppv <- function(tab, SE = FALSE, method = "analytic", correction = NULL) {
+  make_result(tab, "ppv", SE, method, correction)
+}
+
+ind_npv <- function(tab, SE = FALSE, method = "analytic", correction = NULL) {
+  make_result(tab, "npv", SE, method, correction)
+}
+
+ind_fpr <- function(tab, SE = FALSE, method = "analytic", correction = NULL) {
+  make_result(tab, "fpr", SE, method, correction)
+}
+
+ind_fnr <- function(tab, SE = FALSE, method = "analytic", correction = NULL) {
+  make_result(tab, "fnr", SE, method, correction)
+}
+
+ind_acc <- function(tab, SE = FALSE, method = "analytic", correction = NULL) {
+  make_result(tab, "acc", SE, method, correction)
+}
+
+ind_f1 <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "f1", SE, method, correction)
+}
+
+ind_mcc <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "mcc", SE, method, correction)
+}
+
+ind_phi <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "phi", SE, method, correction)
+}
+
+ind_youden <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "youden", SE, method, correction)
+}
+
+ind_markedness <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "markedness", SE, method, correction)
+}
+
+ind_bal_acc <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "balanced_accuracy", SE, method, correction)
+}
+
+ind_yule_q <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "yule_q", SE, method, correction)
+}
+
+ind_yule_y <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "yule_y", SE, method, correction)
+}
+
+ind_dor <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "dor", SE, method, correction)
+}
+
+ind_kappa <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "kappa", SE, method, correction)
+}
+
+ind_gwet <- function(tab, SE = FALSE, method = "bootstrap", correction = NULL) {
+  make_result(tab, "gwet", SE, method, correction)
+}
+
+
+ind_summary <- function(tab, SE = FALSE, correction = NULL) {
+  
+  metrics <- c(
+    Sensitivity = metric_value(tab, "sens", correction),
+    Specificity = metric_value(tab, "spec", correction),
+    PPV = metric_value(tab, "ppv", correction),
+    NPV = metric_value(tab, "npv", correction),
+    FPR = metric_value(tab, "fpr", correction),
+    FNR = metric_value(tab, "fnr", correction),
+    Accuracy = metric_value(tab, "acc", correction),
+    `F1-score` = metric_value(tab, "f1", correction),
+    `Balanced accuracy` = metric_value(tab, "balanced_accuracy", correction),
+    `Youden index` = metric_value(tab, "youden", correction),
+    Markedness = metric_value(tab, "markedness", correction),
+    Phi = metric_value(tab, "phi", correction),
+    MCC = metric_value(tab, "mcc", correction),
+    `Yule Q` = metric_value(tab, "yule_q", correction),
+    `Yule Y` = metric_value(tab, "yule_y", correction),
+    `Diagnostic OR` = metric_value(tab, "dor", correction),
+    `Cohen's kappa` = metric_value(tab, "kappa", correction),
+    `Gwet AC1` = metric_value(tab, "gwet", correction)
+  )
+  
+  res <- data.frame(
+    statistic = metrics
+  )
+  
+  return(res)
+}
+
 ############################################################
 # FIGURA 2: MCC vs Accuracy
 ############################################################
